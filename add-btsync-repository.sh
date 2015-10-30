@@ -2,7 +2,7 @@
 #
 # (c) 2014 YeaSoft Int'l - Leo Moll
 #
-# VERSION 0.1
+# VERSION 0.3
 # This script adds the YeaSoft BitTorrent Sync packaging
 # repositories to a machine and also adds the signer key
 
@@ -76,8 +76,12 @@ fi
 
 echo "Installing package signing key..."
 if ! $SUDO apt-key adv --keyserver keys.gnupg.net --recv-keys 6BF18B15; then
-	show_error "Package signing key installation failed."
-	exit $?
+	curl -s http://debian.yeasoft.net/btsync.key | apt-key add --
+	ERR=$?
+	if [ ! ${ERR} ]; then
+		show_error "Package signing key installation failed."
+		exit ${ERR}
+	fi
 fi
 echo
 
@@ -92,6 +96,7 @@ if which lsb_release 2> /dev/null > /dev/null; then
 	raring)		;;
 	saucy)		;;
 	trusty)		;;
+	utopic)		;;
 	# detected debian versions
 	squeeze)	;;
 	wheezy)		;;

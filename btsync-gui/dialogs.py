@@ -25,6 +25,7 @@ import os
 import gettext
 import qrencode
 import requests
+import logging
 
 from gettext import gettext as _
 from gi.repository import Gtk, Gdk, GdkPixbuf
@@ -69,17 +70,19 @@ class BtSyncFolderAdd(BtBaseDialog):
 						'secret or enter your shared folder secret.'
 					))
 				# test if string is an absolute path and a directory
-				elif len(self.folder) == 0 or self.folder[0] != '/' or not os.path.isdir(self.folder):
+				elif len(self.folder) == 0 or self.folder[0] != '/':
 					self.show_warning(_('Can\'t open the destination folder.'))
 				# test if the specified data is unique
 				elif self.is_duplicate_folder(self.folder,self.secret):
 					self.show_warning(_(
 						'Selected folder is already added to BitTorrent Sync.'
 					))
-				# if btsync agent is local perform more tests
-				elif self.agent.is_local():
+				# if btsync agent is under our control perform more tests
+				elif self.agent.is_primary():
 					# test if the specified directory is readable and writable
-					if not os.access(self.folder,os.W_OK) or not os.access(self.folder,os.R_OK):
+					if not os.path.isdir(self.folder):
+						self.show_warning(_('Can\'t open the destination folder.'))
+					elif not os.access(self.folder,os.W_OK) or not os.access(self.folder,os.R_OK):
 						self.show_warning(_(
 							'Don\'t have permissions to write to the selected folder.'
 						))
@@ -492,6 +495,91 @@ class BtSyncHostAdd(BtBaseDialog):
 				else:
 					return response
 
+class BtSyncSettingsAdvanced(BtBaseDialog):
+	def __init__(self,agent):
+		BtBaseDialog.__init__(self, 'dialogs.glade', 'advsettings')
+		self.agent = agent
+		self.changed = False
+
+	def create(self):
+		BtBaseDialog.create(self)
+		self.username = self.agent.get_pref('username',None)
+		self.password = self.agent.get_pref('password',None)
+		self.bindui = self.agent.get_pref('bindui',None)
+		self.portui = self.agent.get_pref('portui',None)
+
+		self.username_w = self.builder.get_object('username_value')
+		self.password_w = self.builder.get_object('password_value')
+		self.bindportset_w = self.builder.get_object('bindport_set')
+		self.bindport_w = self.builder.get_object('bindport_value')
+		self.bindlocal_w = self.builder.get_object('bind_local')
+		self.bindall_w = self.builder.get_object('bind_all')
+		self.bindother_w = self.builder.get_object('bind_other')
+
+		self.bindportset_w.set_active(self.portui is not None)
+		self.bindport_w.set_sensitive(self.portui is not None)
+		self.bindport_w.set_range(8000, 65534)
+		self.bindport_w.set_increments(1, 100)
+		self.bindport_w.set_value(self.agent.uid + 8999 if self.portui is None else self.portui)
+		self.username_w.set_text("" if self.username is None else self.username)
+		self.password_w.set_text("" if self.password is None else self.password)
+
+		self.bindother_w.set_sensitive(False)
+		if self.bindui is None or self.bindui == '127.0.0.1' or self.bindui == 'localhost':
+			self.bindlocal_w.set_active(True)
+		elif self.bindui == '0.0.0.0' or self.bindui == 'auto':
+			self.bindall_w.set_active(True)
+		else:
+			self.bindother_w.set_active(True)
+		self.changed = False
+
+	def run(self):
+		self.dlg.set_default_response(Gtk.ResponseType.OK)
+		while True:
+			response = BtBaseDialog.run(self)
+			if response == Gtk.ResponseType.CANCEL:
+				return response
+			elif response == Gtk.ResponseType.DELETE_EVENT:
+				return response
+			elif response == Gtk.ResponseType.OK:
+				if self.changed:
+					# read settings
+					self.username = self.username_w.get_text()
+					self.password = self.password_w.get_text()
+					if self.username == '' or self.password == '':
+						self.username = None
+						self.password = None
+					self.portui = self.bindport_w.get_value_as_int() if self.bindportset_w.get_active() else None
+					if self.bindlocal_w.get_active():
+						self.bindui = None
+					elif self.bindall_w.get_active():
+						self.bindui = '0.0.0.0'
+					# process settings
+					self.agent.set_pref('username', self.username, delnone=True)
+					self.agent.set_pref('password', self.password, delnone=True)
+					self.agent.set_pref('bindui', self.bindui, delnone=True)
+					self.agent.set_pref('portui', self.portui, delnone=True)
+					# restart the whole game...
+					if self.agent.paused:
+						self.agent.load_prefs()
+						self.agent.read_prefs()
+						self.agent.reset_connection_params()
+					else:
+						self.agent.suspend()
+						self.agent.load_prefs()
+						self.agent.read_prefs()
+						self.agent.reset_connection_params()
+						self.agent.resume()
+				return response
+
+	def onChanged(self,widget):
+		self.changed = True
+
+	def onBindPortToggled(self,widget):
+		self.bindport_w.set_sensitive(widget.get_active())
+		self.changed = True
+
+
 class BtSyncPrefsAdvanced(BtBaseDialog,BtInputHelper):
 
 	def __init__(self,agent):
@@ -506,6 +594,17 @@ class BtSyncPrefsAdvanced(BtBaseDialog,BtInputHelper):
 		self.prefs = self.agent.get_prefs()
 		self.create()
 
+	def set_treeview_sort_info(self,treewidget,sortinfo):
+		if sortinfo[0] is not None:
+			treemodel = treewidget.get_model()
+			treemodel.set_sort_column_id(sortinfo[0],sortinfo[1])
+			columns = treewidget.get_columns()
+			for index, value in enumerate(columns):
+				if value.get_sort_column_id() == sortinfo[0]:
+					value.set_sort_order(sortinfo[1])
+					value.set_sort_indicator(True)
+					return
+
 	def create(self):
 		BtBaseDialog.create(self)
 		# get the editing widgets
@@ -515,6 +614,10 @@ class BtSyncPrefsAdvanced(BtBaseDialog,BtInputHelper):
 		self.ap_switch_value = self.builder.get_object('ap_switch_value')
 		self.ap_entry_value = self.builder.get_object('ap_entry_value')
 		self.ap_reset_value = self.builder.get_object('ap_reset_value')
+		self.set_treeview_sort_info(
+			self.ap_tree_prefs,
+			[0, Gtk.SortType.ASCENDING]
+		)
 		# initialize content
 		self.init_editor()
 		self.init_values()
@@ -525,7 +628,7 @@ class BtSyncPrefsAdvanced(BtBaseDialog,BtInputHelper):
 		self.advancedprefs.clear()
 		for key, value in self.prefs.items():
 			valDesc = BtValueDescriptor.new_from(key,value)
-			if valDesc.Advanced:
+			if valDesc.Advanced and not valDesc.Hidden:
 				self.advancedprefs.append([
 					str(key), str(value),
 					400 if valDesc.is_default(value) else 900,

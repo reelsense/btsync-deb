@@ -32,7 +32,7 @@ from gi.repository import Gtk, GObject
 
 class BtValueDescriptor(GObject.GObject):
 
-	def __init__(self, Name, Type, Value, Default='', Min=None, Max=None, Allowed=None, Forbidden=None, Advanced=True):
+	def __init__(self, Name, Type, Value, Default='', Min=None, Max=None, Allowed=None, Forbidden=None, Advanced=True, Hidden=False, Local=False):
 		GObject.GObject.__init__(self)
 		self.Name		= Name
 		self.Type		= Type
@@ -43,6 +43,8 @@ class BtValueDescriptor(GObject.GObject):
 		self.Allowed	= Allowed
 		self.Forbidden	= Forbidden
 		self.Advanced	= Advanced
+		self.Hidden		= Hidden
+		self.Local		= Local
 		if self.Type == 'n' and self.Allowed is None:
 			self.Allowed = '0123456789'
 			if str(self.Value)[0:1] == '*':	# remove these stupid "I'm not a default value!"-stars from data
@@ -59,6 +61,12 @@ class BtValueDescriptor(GObject.GObject):
 
 	def is_default(self,value):
 		return False if self.Default is None else str(self.Default) == str(value)
+
+	def is_hidden(self):
+		return self.Hidden
+
+	def is_local(self):
+		return self.Local
 
 	def set_default(self):
 		self.Value = self.Default
@@ -108,26 +116,41 @@ class BtValueDescriptor(GObject.GObject):
 		suitable BtValueDescriptor
 		"""
 		return {
+		'config_refresh_interval'			: BtValueDescriptor (Name, 'n', Value, 3600, 60, 9999999),
 		'device_name'						: BtValueDescriptor (Name, 's', Value, Advanced = False), 
 		'disk_low_priority'					: BtValueDescriptor (Name, 'b', Value, 1),
 		'download_limit'					: BtValueDescriptor (Name, 'n', Value, 0, 0, 1000000, Advanced = False),
 		'external_port'						: BtValueDescriptor (Name, 'n', Value, 0, 0, 65534),
+		'folder_defaults.delete_to_trash'	: BtValueDescriptor (Name, 'b', Value, 1),
+		'folder_defaults.known_hosts'		: BtValueDescriptor (Name, 's', Value),
+		'folder_defaults.use_dht'			: BtValueDescriptor (Name, 'b', Value, 0),
+		'folder_defaults.use_lan_broadcast'	: BtValueDescriptor (Name, 'b', Value, 1),
+		'folder_defaults.use_relay'			: BtValueDescriptor (Name, 'b', Value, 1),
+		'folder_defaults.use_tracker'		: BtValueDescriptor (Name, 'b', Value, 1),
 		'folder_rescan_interval'			: BtValueDescriptor (Name, 'n', Value, 600, 10, 999999),
 		'lan_encrypt_data'					: BtValueDescriptor (Name, 'b', Value, 1),
 		'lan_use_tcp'						: BtValueDescriptor (Name, 'b', Value, 0),
 		'lang'								: BtValueDescriptor (Name, 'e', Value, 28261, Advanced = False),
 		'listening_port'					: BtValueDescriptor (Name, 'n', Value, 0, 1025, 65534, Advanced = False),
-		'log_size'							: BtValueDescriptor (Name, 'n', Value, 10, 10, 999999),
+		'log_size'							: BtValueDescriptor (Name, 'n', Value, 100, 100, 999999),
 		'max_file_size_diff_for_patching'	: BtValueDescriptor (Name, 'n', Value, 1000, 10, 999999),
 		'max_file_size_for_versioning'		: BtValueDescriptor (Name, 'n', Value, 1000, 10, 999999),
+		'peer_expiration_days'				: BtValueDescriptor (Name, 'n', Value, 7, 1, 3650),
+		'profiler_enabled'					: BtValueDescriptor (Name, 'b', Value, 0),
 		'rate_limit_local_peers'			: BtValueDescriptor (Name, 'b', Value, 0),
-		'recv_buf_size'						: BtValueDescriptor (Name, 'n', Value, 5, 1, 100),
-		'send_buf_size'						: BtValueDescriptor (Name, 'n', Value, 5, 1, 100),
+		'recv_buf_size'						: BtValueDescriptor (Name, 'n', Value, 10, 1, 100),
+		'send_buf_size'						: BtValueDescriptor (Name, 'n', Value, 10, 1, 100),
 		'sync_max_time_diff'				: BtValueDescriptor (Name, 'n', Value, 600, 0, 999999),
 		'sync_trash_ttl'					: BtValueDescriptor (Name, 'n', Value, 30, 0, 999999),
 		'upload_limit'						: BtValueDescriptor (Name, 'n', Value, 0, 0, 1000000, Advanced = False),
 		'use_upnp'							: BtValueDescriptor (Name, 'b', Value, 1, Advanced = False),
-		}.get(Name,BtValueDescriptor (Name, 'u', Value))
+		# the following values are not from btsync but only for the gui itself
+		'dark'								: BtValueDescriptor (Name, 'b', Value, False, Local=True),
+		'foldersmenu'						: BtValueDescriptor (Name, 'b', Value, False, Local=True),
+		'webui'								: BtValueDescriptor (Name, 'b', Value, True, Local=True),
+		'username'							: BtValueDescriptor (Name, 's', Value, Forbidden="\"'", Local=True),
+		'password'							: BtValueDescriptor (Name, 's', Value, Local=True)
+		}.get(Name,BtValueDescriptor (Name, 'u', Value, Hidden = True))
 
 	@staticmethod
 	def _to_num(value,default=0):
@@ -245,25 +268,30 @@ class BtMessageHelper(object):
 	def __init__(self):
 		self.msgdlg = None
 
-	def show_message(self,parent,messagetext,messagetype=Gtk.MessageType.INFO):
+	def show_message(self,parent,messagetext,messagetype=Gtk.MessageType.INFO,buttons=Gtk.ButtonsType.CLOSE):
 		self.msgdlg = Gtk.MessageDialog (
 			parent,
 			Gtk.DialogFlags.DESTROY_WITH_PARENT,
 			messagetype,
-			Gtk.ButtonsType.CLOSE,
+			buttons,
 			None
 		)
 		self.msgdlg.set_markup('<b>BitTorrent Sync</b>')
 		self.msgdlg.format_secondary_markup(messagetext)
-		self.msgdlg.run()
+		result = self.msgdlg.run()
 		self.msgdlg.destroy()
 		self.msgdlg = None
+		return result
 
 	def show_warning(self,parent,messagetext):
-		self.show_message(parent,messagetext,Gtk.MessageType.WARNING)
+		return self.show_message(parent,messagetext,Gtk.MessageType.WARNING)
 
 	def show_error(self,messagetext):
-		self.show_message(parent,messagetext,Gtk.MessageType.ERROR)
+		return self.show_message(parent,messagetext,Gtk.MessageType.ERROR)
+
+	def show_question(self,parent,messagetext):
+		return self.show_message(parent,messagetext,Gtk.MessageType.QUESTION, Gtk.ButtonsType.YES_NO)
+
 
 class BtBaseDialog(BtMessageHelper):
 

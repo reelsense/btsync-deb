@@ -47,6 +47,14 @@ terminal prompt:
 sh -c "$(curl -fsSL http://debian.yeasoft.net/add-btsync-repository.sh)"
 ```
 
+If instead you wish to __stay on version 1.4__, you should paste the following
+command at a terminal prompt:
+
+```bash
+sh -c "$(curl -fsSL http://debian.yeasoft.net/add-btsync14-repository.sh)"
+```
+
+
 The script explains what it will do and then pauses before it does it asking
 for your permission. If you encounter any problems or prefer to do it manually,
 please __[look here](http://www.yeasoft.com/site/projects:btsync-deb:btsync-repo)__.
@@ -191,6 +199,23 @@ instance is able to read and write all files it must access:
 Some example configuration files are provided under `/etc/btsync/samples`
 
 
+### Modular Configuration Files ###
+
+Sometimes it may be useful to generate configuration files out several separate
+parts. The typical user is explained best by forum user [Jero](http://forum.bittorrent.com/user/25088-jero/)
+in this [forum message](http://forum.bittorrent.com/topic/29319-linux-split-config-in-multple-files/):
+
+> I want to have a config file per shared folder. I currently manage 10-20 linux servers. The servers are all connected with btsync.
+> I have created a system that can push scripts to the servers en executed them. But when i need to change one shared folder on one server i just want to push a new file without to touch the other parameters in the config file.
+
+If you want to create a modular configuration file, create a directory in
+`/etc/btsync` named like you would name the configuration file, but with an
+additional `.d` extension and put the parts of your configuration file in it.
+The daemon init script will generate a configuration file at every start by
+joining all **in alphabetical order**. Parts must be text files with the
+extension `.part`.
+
+
 ### Default Startup Parameters ###
 
 The additional configuration file `/etc/default/btsync` permits to specify
@@ -226,6 +251,31 @@ interface binding topic.
 The variable **DAEMON_INIT_DEBUG** permits to enable extended debug output of
 the init-script.
 
+SSL Certificates
+----------------
+
+BitTorrent Sync 1.4 supports also SSL connections to the Web UI. The default
+instance is automatically configured to use a self signed certificate and key
+created during the installation.
+
+The configuration file does not point directly to the self signed certificate
+but to the following symbolic links:
+
+```
+/etc/btsync/debconf-default.crt
+/etc/btsync/debconf-default.key
+```
+
+The default instance can be operated also with user provided certificates
+without tampering with the configuration file by deleting the symbolic links
+and replacing them with files containing the desired certificate and key.
+Debconf will detect that the files are not symbolic links and leave them
+untouched during reconfiguration.
+
+The certificate file and key file must be accessible by the BitTorrent Sync
+daemon.
+
+
 Binding BitTorrent Sync to a specific interface
 -----------------------------------------------
 
@@ -253,13 +303,6 @@ system, the BitTorrent Sync instance will bind only to that specific address.
 This will affect also the Web UI, if `0.0.0.0` is specified as the bind address.
 
 [1]: https://en.wikipedia.org/wiki/Shim_(computing)
-
-Some Remarks about Autoupdate
------------------------------
-
-The daemon scripts require that autoupdate is disabled in the configuration
-script, otherwise the instance will not be started. The reason for that is,
-that updates are handled by the Debian/Ubuntu package handling utility itself.
 
 
 Compatibility
